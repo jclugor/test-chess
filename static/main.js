@@ -24,3 +24,16 @@ function reset() {
   fetch("/reset", { method: "POST", credentials: "include" })
       .then(()=> refresh());
 }
+let stamp = 0;                   // board version we last saw
+
+function refresh() {
+  fetch("/frame?v=" + stamp, { credentials: "include" })
+    .then(r => {
+      if (r.status === 304) return;   // nothing new
+      return r.blob().then(b => {
+        stamp++;                      // on any 200 we bump
+        boardImg.src = URL.createObjectURL(b);
+      });
+    });
+}
+setInterval(refresh, 50);        // 20 FPS feels instant, yet light
