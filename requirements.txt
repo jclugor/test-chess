@@ -1,0 +1,5 @@
+Flask==3.0.3
+python-chess==1.999
+pygame==2.5.2          # headless build is fine
+Pillow==10.3.0         # Pygame → PNG
+gunicorn==22.0.0
