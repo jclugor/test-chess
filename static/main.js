@@ -25,15 +25,43 @@ function reset() {
       .then(()=> refresh());
 }
 let stamp = 0;                   // board version we last saw
+const boardImg  = document.getElementById("board");
+let   versionID = 0;     // the frame number we already have
 
-function refresh() {
-  fetch("/frame?v=" + stamp, { credentials: "include" })
+function poll() {
+  fetch("/frame?v=" + versionID, { credentials: "include" })
     .then(r => {
-      if (r.status === 304) return;   // nothing new
+      if (r.status === 304) return;            // nothing changed
       return r.blob().then(b => {
-        stamp++;                      // on any 200 we bump
-        boardImg.src = URL.createObjectURL(b);
+        versionID++;                           // got a new version
+        boardImg.src = URL.createObjectURL(b); // paint it
       });
     });
 }
-setInterval(refresh, 50);        // 20 FPS feels instant, yet light
+setInterval(poll, 50);                         // 20 FPS ≈ smooth
+
+
+function squareOf(evt) {
+  const rect = boardImg.getBoundingClientRect();
+  return {
+    row: Math.floor((evt.clientY - rect.top ) / 80),
+    col: Math.floor((evt.clientX - rect.left) / 80)
+  };
+}
+
+boardImg.addEventListener("mousedown", e => {
+  fetch("/click", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(squareOf(e))
+  });
+});
+
+function reset() {
+  fetch("/reset", { method: "POST", credentials: "include" });
+}
+
+function flip() {
+  fetch("/flip", { credentials: "include" }).then(() => location.reload());
+}
