@@ -1,13 +1,11 @@
 from __future__ import annotations
-import os
 os.environ["SDL_VIDEODRIVER"] = "dummy"   # no real X-server available
 import io, math, os, base64
 from functools import wraps
 from flask import Flask, request, Response, render_template, redirect
-import pygame as pg
 import chess
 from PIL import Image
-import io, pygame as pg
+import pygame as pg
 
 
 # ─── basic HTTP auth ────────────────────────────────────────────────────────
@@ -33,12 +31,13 @@ def require_auth(f):
 
 # ─── game state (single shared board) ───────────────────────────────────────
 board       = chess.Board()
+human_color = chess.WHITE
 last_mv     = None
 SEL_SQ      = None
 LEGAL_SQS   = []
-frame_png   = b""      # cached bytes
-frame_stamp = 0 
 
+frame_png   = b""          #   cached JPEG bytes
+frame_stamp = 0            #   monotonically-increasing version id
 # ─── Pygame off-screen context ──────────────────────────────────────────────
 SQ = 80
 SIZE = SQ*8, SQ*8
@@ -151,15 +150,20 @@ def draw_board(dst: pg.Surface,
 PIECE_VAL = {chess.PAWN:100, chess.KNIGHT:320, chess.BISHOP:330,
              chess.ROOK:500, chess.QUEEN:900, chess.KING:0}
 def redraw():
-    """Rebuild the PNG buffer & bump the stamp."""
+    """Rebuild the JPEG buffer & bump the version counter."""
     global frame_png, frame_stamp
     draw_board(surf, board, SEL_SQ, LEGAL_SQS, last_mv)
-    raw = pg.image.tostring(surf, "RGBA")
-    img = Image.frombytes("RGBA", SIZE, raw)
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=75, optimize=True)   # ← JPEG, small
-    frame_png = buf.getvalue()
+
+    raw  = pg.image.tostring(surf, "RGBA")
+    img  = Image.frombytes("RGBA", SIZE, raw)
+    buf  = io.BytesIO()
+    img.save(buf, format="JPEG", quality=75, optimize=True)  # 15–20 kB
+    frame_png   = buf.getvalue()
     frame_stamp += 1
+
+
+# produce the very first frame
+redraw()
     
 def evaluate(bd, ai_c):
     if bd.is_checkmate():
@@ -198,22 +202,12 @@ app = Flask(__name__, static_folder="static", template_folder="templates")
 @require_auth
 def index():
     return render_template("index.html")
-
 @app.route("/frame")
 @require_auth
 def frame():
-    """Return the current board as a PNG buffer."""
-    draw_board(surf, board, SEL_SQ, LEGAL_SQS, last_mv)
-
-    # Convert the Pygame surface to a PNG in-memory
-    raw = pg.image.tostring(surf, "RGBA")
-    img = Image.frombytes("RGBA", SIZE, raw)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")   # real PNG!
-    buf.seek(0)
-    client_ver = int(request.args.get("v", 0))
-    if client_ver == frame_stamp:
-        return Response(status=304)          # "Not Modified"
+    client_v = int(request.args.get("v", 0))
+    if client_v == frame_stamp:                 # browser already has it
+        return Response(status=304)             # “Not Modified”
     return Response(frame_png,
                     mimetype="image/jpeg",
                     headers={"Cache-Control": "no-store"})
@@ -221,35 +215,30 @@ def frame():
 @app.route("/click", methods=["POST"])
 @require_auth
 def click():
-    """
-    Handles one mouse-click coming from the browser.
-    The client sends the row/col (0-7) of the square that was clicked.
-    """
-    global SEL_SQ, LEGAL_SQS, last_mv
+    global SEL_SQ, LEGAL_SQS, last_mv, human_color
 
-    # row / col from JSON
     data = request.get_json(force=True)
     r, c = int(data["row"]), int(data["col"])
-    sq = rc_to_sq(r, c)
+    sq   = rc_to_sq(r, c)
 
-    # Ignore clicks during AI turn or after game over
+    # ignore clicks while it’s the AI’s turn
     if board.turn != human_color or board.is_game_over():
-        return ("AI thinking", 202)
+        return ("busy", 202)
 
-    # ─── first click: select a piece ─────────────────────────────
+    # first click = select a piece
     if SEL_SQ is None:
         pc = board.piece_at(sq)
         if pc and pc.color == human_color:
-            SEL_SQ = sq
+            SEL_SQ    = sq
             LEGAL_SQS = [m.to_square for m in board.legal_moves
-                         if m.from_square == SEL_SQ]
-        # respond OK either way so the client can refresh
+                         if m.from_square == sq]
+            redraw()
         return "ok"
 
-    # ─── second click: attempt a move ────────────────────────────
+    # second click = try to move
     move = chess.Move(SEL_SQ, sq)
 
-    # handle promotion (default to queen for simplicity)
+    # promotion (auto-queen for web simplicity)
     if (move in board.legal_moves and
         board.piece_at(SEL_SQ).piece_type == chess.PAWN and
         chess.square_rank(sq) in (0, 7)):
@@ -259,17 +248,16 @@ def click():
         board.push(move)
         last_mv = move
 
-        # let the AI reply immediately
+        # AI reply
         if not board.is_game_over():
             mv_ai = ai_move(board, not human_color)
             if mv_ai:
                 board.push(mv_ai)
                 last_mv = mv_ai
 
-    # clear selection / highlights for the next user click
     SEL_SQ = None
     LEGAL_SQS = []
-
+    redraw()
     return "ok"
 
 
@@ -278,17 +266,18 @@ def click():
 def flip():
     global human_color
     human_color = not human_color
-    board.reset()
+    board.reset(); redraw()
     return redirect("/")
 
 @app.route("/reset", methods=["POST"])
 @require_auth
 def reset():
-    global SEL_SQ, LEGAL_SQS, last_mv, board
-    board.reset()
+    global board, SEL_SQ, LEGAL_SQS, last_mv
+    board = chess.Board()
     SEL_SQ = None
     LEGAL_SQS = []
     last_mv = None
+    redraw()
     return "ok"
 # ─── Run locally (Render uses gunicorn) ─────────────────────────────────────
 if __name__ == "__main__":
