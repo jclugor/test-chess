@@ -60,10 +60,37 @@ LEGAL_COLOR  = (186, 202,  68)
 LAST_COLOR   = (255, 195,  77)
 ARROW_COLOR  = (255, 90,  90)
 
-def build_sprite(piece_type, color_bool):
-    # … (exact function body copied from the canvas file) …
-    #  🔸 keep everything exactly the same 🔸
-    pass  # <-- replace with real body!
+def build_sprite(piece_type: int, color_bool: bool) -> pg.Surface:
+    surf = pg.Surface((SQ, SQ), pg.SRCALPHA)
+    # simple two-color glyph: white pieces are light-gray, black pieces dark-gray
+    fg = (245, 245, 245) if color_bool else (40, 40, 40)
+    bg = (0, 0, 0, 0)
+    surf.fill(bg)
+
+    # draw very-simple shapes so we stay self-contained
+    mid = SQ // 2
+    r   = SQ // 2 - 6
+    if piece_type == chess.PAWN:
+        pg.draw.circle(surf, fg, (mid, mid+6), r-8)
+    elif piece_type == chess.ROOK:
+        pg.draw.rect(surf, fg, (mid-r+4, mid-r+4, 2*r-8, 2*r-4))
+    elif piece_type == chess.KNIGHT:
+        pts = [(mid-r+4, mid+r-4), (mid-r+4, mid-2), (mid, mid-r+4),
+               (mid+r-4, mid-4), (mid+2, mid+4), (mid+r-6, mid+r-4)]
+        pg.draw.polygon(surf, fg, pts)
+    elif piece_type == chess.BISHOP:
+        pg.draw.ellipse(surf, fg, (mid-r+4, mid-r+4, 2*r-8, 2*r))
+    elif piece_type == chess.QUEEN:
+        pts = [(mid-r+4, mid+r-4), (mid-r+4, mid-6), (mid-r//2, mid-r+4),
+               (mid, mid-10), (mid+r//2, mid-r+4), (mid+r-4, mid-6),
+               (mid+r-4, mid+r-4)]
+        pg.draw.polygon(surf, fg, pts)
+    elif piece_type == chess.KING:
+        pg.draw.rect(surf, fg, (mid-r+6, mid-r+4, 2*r-12, 2*r))
+        pg.draw.line(surf, fg, (mid, mid-r-4), (mid, mid-r+8), 4)
+        pg.draw.line(surf, fg, (mid-8, mid-r), (mid+8, mid-r), 4)
+    return surf
+
 
 def piece_sprite(piece):  # unchanged
     key = (piece.piece_type, piece.color)
@@ -74,10 +101,49 @@ def piece_sprite(piece):  # unchanged
 def rc_to_sq(r,c): return chess.square(c, 7-r)
 def sq_to_rc(sq):  return 7-chess.square_rank(sq), chess.square_file(sq)
 
-def draw_board(surface, board, sel_sq, legal, last_move):
-    # … (identical drawing logic from the canvas file) …
-    pass  # <-- replace with real body!
-# … END helper section …
+# ---------- draw_board ------------------------------------------------------
+LIGHT = (240, 217, 181)
+DARK  = (181, 136,  99)
+SEL   = (247, 247, 105)
+LEGAL = (186, 202,  68)
+LAST  = (255, 195,  77)
+ARROW = (255,  90,  90)
+
+def draw_board(dst: pg.Surface,
+               board: chess.Board,
+               sel_sq: chess.Square|None,
+               legal_sqs: list[chess.Square],
+               last_move: chess.Move|None):
+    # board squares
+    for r in range(8):
+        for c in range(8):
+            pg.draw.rect(dst, LIGHT if (r+c)%2==0 else DARK,
+                         pg.Rect(c*SQ, r*SQ, SQ, SQ))
+
+    # last-move highlight + arrow
+    if last_move:
+        for sq in (last_move.from_square, last_move.to_square):
+            rr, cc = 7-chess.square_rank(sq), chess.square_file(sq)
+            pg.draw.rect(dst, LAST, pg.Rect(cc*SQ, rr*SQ, SQ, SQ))
+        # arrow
+        rf, cf = 7-chess.square_rank(last_move.from_square), chess.square_file(last_move.from_square)
+        rt, ct = 7-chess.square_rank(last_move.to_square),   chess.square_file(last_move.to_square)
+        start = (cf*SQ+SQ//2, rf*SQ+SQ//2)
+        end   = (ct*SQ+SQ//2, rt*SQ+SQ//2)
+        pg.draw.line(dst, ARROW, start, end, 6)
+
+    # selection + legal
+    if sel_sq is not None:
+        rs, cs = 7-chess.square_rank(sel_sq), chess.square_file(sel_sq)
+        pg.draw.rect(dst, SEL, pg.Rect(cs*SQ, rs*SQ, SQ, SQ))
+    for sq in legal_sqs:
+        rr, cc = 7-chess.square_rank(sq), chess.square_file(sq)
+        pg.draw.rect(dst, LEGAL, pg.Rect(cc*SQ, rr*SQ, SQ, SQ))
+
+    # pieces
+    for sq, pc in board.piece_map().items():
+        rr, cc = 7-chess.square_rank(sq), chess.square_file(sq)
+        dst.blit(piece_sprite(pc), (cc*SQ, rr*SQ))
 
 # ─── naive AI (same as before, depth-3 minimax) ─────────────────────────────
 PIECE_VAL = {chess.PAWN:100, chess.KNIGHT:320, chess.BISHOP:330,
