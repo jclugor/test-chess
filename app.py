@@ -1,9 +1,14 @@
+import os
+os.environ["SDL_VIDEODRIVER"] = "dummy"   # no real X-server available
 from __future__ import annotations
 import io, math, os, base64
 from functools import wraps
 from flask import Flask, request, Response, render_template, redirect
 import pygame as pg
 import chess
+from PIL import Image
+import io, pygame as pg
+
 
 # ─── basic HTTP auth ────────────────────────────────────────────────────────
 USERNAME = os.getenv("CHESS_USER", "friend")
@@ -119,14 +124,18 @@ def index():
 @app.route("/frame")
 @require_auth
 def frame():
-    """Return the current board as PNG."""
-    draw_board(surf, board, SEL_SQ, [], last_mv)
-    buf = pg.image.tostring(surf, "RGB")
-    img = pg.image.fromstring(buf, SIZE, "RGB")
-    f = io.BytesIO()
-    pg.image.save(img, f)
-    f.seek(0)
-    return Response(f.getvalue(), mimetype="image/png",
+    """Return the current board as a PNG buffer."""
+    draw_board(surf, board, SEL_SQ, [], last_mv)   # draw onto the off-screen Surface
+
+    # Convert the Pygame surface to a PNG in-memory
+    raw = pg.image.tostring(surf, "RGBA")
+    img = Image.frombytes("RGBA", SIZE, raw)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")   # real PNG!
+    buf.seek(0)
+
+    return Response(buf.getvalue(),
+                    mimetype="image/png",
                     headers={"Cache-Control": "no-cache"})
 
 @app.route("/click", methods=["POST"])
