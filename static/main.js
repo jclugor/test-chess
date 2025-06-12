@@ -19,3 +19,8 @@ function click(e) {
 }
 
 function flip() { fetch("/flip").then(()=>location.reload()); }
+
+function reset() {
+  fetch("/reset", { method: "POST", credentials: "include" })
+      .then(()=> refresh());
+}
