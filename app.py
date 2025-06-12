@@ -151,15 +151,14 @@ def draw_board(dst: pg.Surface,
 PIECE_VAL = {chess.PAWN:100, chess.KNIGHT:320, chess.BISHOP:330,
              chess.ROOK:500, chess.QUEEN:900, chess.KING:0}
 def redraw():
-    """Rebuild the JPEG buffer & bump the version counter."""
     global frame_png, frame_stamp
     draw_board(surf, board, SEL_SQ, LEGAL_SQS, last_mv)
 
-    raw  = pg.image.tostring(surf, "RGBA")
-    img  = Image.frombytes("RGBA", SIZE, raw)
-    buf  = io.BytesIO()
-    img.save(buf, format="JPEG", quality=75, optimize=True)  # 15–20 kB
-    frame_png   = buf.getvalue()
+    raw = pg.image.tostring(surf, "RGBA")
+    img = Image.frombytes("RGBA", SIZE, raw).convert("RGB")   # ← convert!
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=75, optimize=True)   # now works
+    frame_png  = buf.getvalue()
     frame_stamp += 1
 
 
