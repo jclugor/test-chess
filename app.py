@@ -34,8 +34,9 @@ def require_auth(f):
 # ─── game state (single shared board) ───────────────────────────────────────
 board  = chess.Board()
 last_mv: chess.Move|None = None
-human_color = chess.WHITE      # can flip on demand
 SEL_SQ: chess.Square|None = None
+LEGAL_SQS: list[chess.Square] = []      #  ← NEW
+human_color = chess.WHITE
 
 # ─── Pygame off-screen context ──────────────────────────────────────────────
 SQ = 80
@@ -191,7 +192,7 @@ def index():
 @require_auth
 def frame():
     """Return the current board as a PNG buffer."""
-    draw_board(surf, board, SEL_SQ, [], last_mv)   # draw onto the off-screen Surface
+    draw_board(surf, board, SEL_SQ, LEGAL_SQS, last_mv)
 
     # Convert the Pygame surface to a PNG in-memory
     raw = pg.image.tostring(surf, "RGBA")
@@ -207,31 +208,57 @@ def frame():
 @app.route("/click", methods=["POST"])
 @require_auth
 def click():
-    global SEL_SQ, last_mv
-    data = request.json
-    r,c = int(data["row"]), int(data["col"])
-    sq  = rc_to_sq(r,c)
+    """
+    Handles one mouse-click coming from the browser.
+    The client sends the row/col (0-7) of the square that was clicked.
+    """
+    global SEL_SQ, LEGAL_SQS, last_mv
 
+    # row / col from JSON
+    data = request.get_json(force=True)
+    r, c = int(data["row"]), int(data["col"])
+    sq = rc_to_sq(r, c)
+
+    # Ignore clicks during AI turn or after game over
     if board.turn != human_color or board.is_game_over():
-        return "AI thinking", 202
+        return ("AI thinking", 202)
 
+    # ─── first click: select a piece ─────────────────────────────
     if SEL_SQ is None:
         pc = board.piece_at(sq)
         if pc and pc.color == human_color:
             SEL_SQ = sq
-    else:
-        mv = chess.Move(SEL_SQ, sq)
-        if mv in board.legal_moves:
-            board.push(mv); last_mv = mv
-            SEL_SQ = None
-            # ---- AI reply
-            if not board.is_game_over():
-                mv_ai = ai_move(board, not human_color)
-                if mv_ai:
-                    board.push(mv_ai); last_mv = mv_ai
-        else:
-            SEL_SQ = None
+            LEGAL_SQS = [m.to_square for m in board.legal_moves
+                         if m.from_square == SEL_SQ]
+        # respond OK either way so the client can refresh
+        return "ok"
+
+    # ─── second click: attempt a move ────────────────────────────
+    move = chess.Move(SEL_SQ, sq)
+
+    # handle promotion (default to queen for simplicity)
+    if (move in board.legal_moves and
+        board.piece_at(SEL_SQ).piece_type == chess.PAWN and
+        chess.square_rank(sq) in (0, 7)):
+        move = chess.Move(SEL_SQ, sq, promotion=chess.QUEEN)
+
+    if move in board.legal_moves:
+        board.push(move)
+        last_mv = move
+
+        # let the AI reply immediately
+        if not board.is_game_over():
+            mv_ai = ai_move(board, not human_color)
+            if mv_ai:
+                board.push(mv_ai)
+                last_mv = mv_ai
+
+    # clear selection / highlights for the next user click
+    SEL_SQ = None
+    LEGAL_SQS = []
+
     return "ok"
+
 
 @app.route("/flip")
 @require_auth
@@ -241,6 +268,15 @@ def flip():
     board.reset()
     return redirect("/")
 
+@app.route("/reset", methods=["POST"])
+@require_auth
+def reset():
+    global SEL_SQ, LEGAL_SQS, last_mv, board
+    board.reset()
+    SEL_SQ = None
+    LEGAL_SQS = []
+    last_mv = None
+    return "ok"
 # ─── Run locally (Render uses gunicorn) ─────────────────────────────────────
 if __name__ == "__main__":
     app.run(debug=True)
