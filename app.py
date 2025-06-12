@@ -32,11 +32,12 @@ def require_auth(f):
     return wrapper
 
 # ─── game state (single shared board) ───────────────────────────────────────
-board  = chess.Board()
-last_mv: chess.Move|None = None
-SEL_SQ: chess.Square|None = None
-LEGAL_SQS: list[chess.Square] = []      #  ← NEW
-human_color = chess.WHITE
+board       = chess.Board()
+last_mv     = None
+SEL_SQ      = None
+LEGAL_SQS   = []
+frame_png   = b""      # cached bytes
+frame_stamp = 0 
 
 # ─── Pygame off-screen context ──────────────────────────────────────────────
 SQ = 80
@@ -149,7 +150,17 @@ def draw_board(dst: pg.Surface,
 # ─── naive AI (same as before, depth-3 minimax) ─────────────────────────────
 PIECE_VAL = {chess.PAWN:100, chess.KNIGHT:320, chess.BISHOP:330,
              chess.ROOK:500, chess.QUEEN:900, chess.KING:0}
-
+def redraw():
+    """Rebuild the PNG buffer & bump the stamp."""
+    global frame_png, frame_stamp
+    draw_board(surf, board, SEL_SQ, LEGAL_SQS, last_mv)
+    raw = pg.image.tostring(surf, "RGBA")
+    img = Image.frombytes("RGBA", SIZE, raw)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=75, optimize=True)   # ← JPEG, small
+    frame_png = buf.getvalue()
+    frame_stamp += 1
+    
 def evaluate(bd, ai_c):
     if bd.is_checkmate():
         return -1e6 if bd.turn==ai_c else 1e6
@@ -200,10 +211,12 @@ def frame():
     buf = io.BytesIO()
     img.save(buf, format="PNG")   # real PNG!
     buf.seek(0)
-
-    return Response(buf.getvalue(),
-                    mimetype="image/png",
-                    headers={"Cache-Control": "no-cache"})
+    client_ver = int(request.args.get("v", 0))
+    if client_ver == frame_stamp:
+        return Response(status=304)          # "Not Modified"
+    return Response(frame_png,
+                    mimetype="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
 
 @app.route("/click", methods=["POST"])
 @require_auth
