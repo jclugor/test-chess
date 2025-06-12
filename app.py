@@ -1,6 +1,7 @@
 from __future__ import annotations
+import os
 os.environ["SDL_VIDEODRIVER"] = "dummy"   # no real X-server available
-import io, math, os, base64
+import io, math, base64
 from functools import wraps
 from flask import Flask, request, Response, render_template, redirect
 import chess
